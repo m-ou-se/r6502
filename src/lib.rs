@@ -506,7 +506,7 @@ impl Cpu {
 	}
 
 	pub fn exec_rts(&mut self) {
-		self.pc = self.pop_word().wrapping_add(1);
+		self.pc = self.pop_word().wrapping_add(2);
 	}
 
 	pub fn exec_brk(&mut self) {
