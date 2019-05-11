@@ -23,8 +23,43 @@ fn test_cmp() {
 
 #[test]
 fn test_inc() {
-	let mut a = 7;
 	let mut cpu = Cpu::default();
+	let mut a = 7;
 	cpu.exec_inc(&mut a);
 	assert_eq!(a, 8);
+	assert_eq!(cpu.status, Status::empty());
+
+	let mut a = 0x7F;
+	cpu.exec_inc(&mut a);
+	assert_eq!(a, 0x80);
+	assert_eq!(cpu.status, Status::N);
+
+	let mut a = 0xFF;
+	cpu.exec_inc(&mut a);
+	assert_eq!(a, 0x00);
+	assert_eq!(cpu.status, Status::Z);
+}
+
+#[test]
+fn test_dec() {
+	let mut cpu = Cpu::default();
+	let mut a = 8;
+	cpu.exec_dec(&mut a);
+	assert_eq!(a, 7);
+	assert_eq!(cpu.status, Status::empty());
+
+	let mut a = 0x80;
+	cpu.exec_dec(&mut a);
+	assert_eq!(a, 0x7F);
+	assert_eq!(cpu.status, Status::empty());
+
+	let mut a = 0x00;
+	cpu.exec_dec(&mut a);
+	assert_eq!(a, 0xFF);
+	assert_eq!(cpu.status, Status::N);
+
+	let mut a = 0x01;
+	cpu.exec_dec(&mut a);
+	assert_eq!(a, 0x00);
+	assert_eq!(cpu.status, Status::Z);
 }
