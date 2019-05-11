@@ -711,3 +711,6 @@ impl Cpu {
 		self.status.set(Status::Z, value == 0);
 	}
 }
+
+#[cfg(test)]
+mod test;
