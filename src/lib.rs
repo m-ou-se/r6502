@@ -12,7 +12,7 @@ pub struct Cpu {
 	/// The stack pointer.
 	pub s: u8,
 	/// The processor status register.
-	pub p: Status,
+	pub status: Status,
 	/// The program counter.
 	pub pc: u16,
 	/// The memory.
@@ -20,7 +20,7 @@ pub struct Cpu {
 }
 
 bitflags! {
-	/// The [CPU][Cpu]'s [processor status register][Cpu::p].
+	/// The [CPU][Cpu]'s [processor status register][Cpu::status].
 	pub struct Status: u8 {
 		/// The carry or not-borrow flag.
 		const C = 0b00000001;
@@ -38,8 +38,8 @@ bitflags! {
 }
 
 /// An operand to an instruction which may modify it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum MutOp {
+#[derive(Debug)]
+pub enum MutOp<'a> {
 	/// The operand is the [accumulator register][Cpu::a].
 	Acc,
 	/// The operand is the [X register][Cpu::x].
@@ -68,19 +68,33 @@ pub enum MutOp {
 	Inx,
 	/// The operand is located at the (two byte) address that's stored where the [`Zp`][MutOp::Zp] operand would be, plus [`Y`][Cpu::y].
 	Iny,
+	/// The operand is given by a `&mut u8`.
+	Ref(&'a mut u8),
+}
+
+impl<'a> From<&'a mut u8> for MutOp<'a> {
+	fn from(x: &'a mut u8) -> MutOp<'a> {
+		MutOp::Ref(x)
+	}
 }
 
 /// An operand to an instruction which only reads it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Debug)]
 pub enum Op {
-	/// The operand is the given constant.
-	Const(u8),
 	/// The operand is the byte right after the instruction.
 	Imm,
 	/// The operand is stored in some mutable location.
 	///
 	/// See [below](#impl) for short-cuts for these values.
-	Mut(MutOp),
+	Mut(MutOp<'static>),
+	/// The operand is the given constant.
+	Const(u8),
+}
+
+impl From<u8> for Op {
+	fn from(x: u8) -> Op {
+		Op::Const(x)
+	}
 }
 
 #[allow(non_upper_case_globals)]
@@ -107,6 +121,14 @@ pub enum JmpOp {
 	Im2,
 	/// The (two byte) target address of the jump is stored at the (two byte) address stored right after the instruction.
 	Abs,
+	/// The target is address is given as a constant.
+	Const(u16),
+}
+
+impl From<u16> for JmpOp {
+	fn from(x: u16) -> JmpOp {
+		JmpOp::Const(x)
+	}
 }
 
 mod debug;
@@ -118,7 +140,7 @@ impl Default for Cpu {
 			x: 0,
 			y: 0,
 			s: 0xFF,
-			p: Status::empty(),
+			status: Status::empty(),
 			pc: 0,
 			mem: [0u8; 0x10000],
 		}
@@ -190,8 +212,8 @@ impl Cpu {
 	///
 	/// Depending on the type of operand, this might increment the program
 	/// counter by one or two.
-	pub fn get_op(&mut self, op: Op) -> u8 {
-		match op {
+	pub fn get_op(&mut self, op: impl Into<Op>) -> u8 {
+		match op.into() {
 			Op::Const(x) => x,
 			Op::Imm => self.read_imm(),
 			Op::Mut(op) => *self.get_mut_op(op),
@@ -206,7 +228,7 @@ impl Cpu {
 	/// The resulting reference either refers to one of the registers ([the
 	/// accumulator][Cpu::a], [X][Cpu::x], [Y][Cpu::y], or [the stack
 	/// pointer][Cpu::s]), or somewhere into [the memory][Cpu::mem].
-	pub fn get_mut_op(&mut self, op: MutOp) -> &mut u8 {
+	pub fn get_mut_op<'a>(&'a mut self, op: MutOp<'a>) -> &'a mut u8 {
 		match op {
 			MutOp::Acc => &mut self.a,
 			MutOp::X => &mut self.x,
@@ -248,11 +270,13 @@ impl Cpu {
 					.wrapping_add(u16::from(self.y));
 				&mut self.mem[usize::from(addr)]
 			}
+			MutOp::Ref(x) => x,
 		}
 	}
 
-	pub fn get_target(&mut self, op: JmpOp) -> u16 {
-		match op {
+	pub fn get_target(&mut self, op: impl Into<JmpOp>) -> u16 {
+		match op.into() {
+			JmpOp::Const(x) => x,
 			JmpOp::Im2 => self.read_im2(),
 			JmpOp::Abs => {
 				let imm = self.read_im2();
@@ -297,13 +321,13 @@ impl Cpu {
 			0xF0 => self.exec_branch(Status::Z, true ), // BEQ
 
 			// Flag instructions:
-			0x18 => self.p.remove(Status::C), // CLC
-			0x38 => self.p.insert(Status::C), // SEC
-			0x58 => self.p.remove(Status::I), // CLI
-			0x78 => self.p.insert(Status::I), // SEI
-			0xB8 => self.p.remove(Status::V), // CLV
-			0xD8 => self.p.remove(Status::D), // CLD
-			0xF8 => self.p.insert(Status::D), // SED
+			0x18 => self.status.remove(Status::C), // CLC
+			0x38 => self.status.insert(Status::C), // SEC
+			0x58 => self.status.remove(Status::I), // CLI
+			0x78 => self.status.insert(Status::I), // SEI
+			0xB8 => self.status.remove(Status::V), // CLV
+			0xD8 => self.status.remove(Status::D), // CLD
+			0xF8 => self.status.insert(Status::D), // SED
 
 			// Stack instructions:
 			0x08 => self.exec_php(),
@@ -487,7 +511,7 @@ impl Cpu {
 
 	pub fn exec_brk(&mut self) {
 		self.pc = self.pc.wrapping_add(1);
-		if !self.p.contains(Status::I) {
+		if !self.status.contains(Status::I) {
 			self.push_word(self.pc);
 			self.exec_php();
 			self.pc = self.read_word(0xFFFE);
@@ -499,7 +523,7 @@ impl Cpu {
 		self.pc = self.pop_word();
 	}
 
-	pub fn exec_jmp(&mut self, op: JmpOp) {
+	pub fn exec_jmp(&mut self, op: impl Into<JmpOp>) {
 		self.pc = self.get_target(op);
 	}
 
@@ -507,17 +531,17 @@ impl Cpu {
 		let target = self
 			.pc
 			.wrapping_add(i16::from(self.read_imm() as i8) as u16);
-		if self.p.contains(flag) == condition {
+		if self.status.contains(flag) == condition {
 			self.pc = target;
 		}
 	}
 
 	pub fn exec_php(&mut self) {
-		self.push(self.p.bits() | 0b0011_0000);
+		self.push(self.status.bits() | 0b0011_0000);
 	}
 
 	pub fn exec_plp(&mut self) {
-		self.p = Status::from_bits_truncate(self.pop());
+		self.status = Status::from_bits_truncate(self.pop());
 	}
 
 	pub fn exec_pha(&mut self) {
@@ -528,146 +552,146 @@ impl Cpu {
 		self.a = self.pop();
 	}
 
-	pub fn exec_inc(&mut self, op: MutOp) {
-		let op = self.get_mut_op(op);
+	pub fn exec_inc<'a>(&mut self, op: impl Into<MutOp<'a>>) {
+		let op = self.get_mut_op(op.into());
 		*op = op.wrapping_add(1);
 		let op = *op;
 		self.update_n_z(op);
 	}
 
-	pub fn exec_dec(&mut self, op: MutOp) {
-		let op = self.get_mut_op(op);
+	pub fn exec_dec<'a>(&mut self, op: impl Into<MutOp<'a>>) {
+		let op = self.get_mut_op(op.into());
 		*op = op.wrapping_sub(1);
 		let op = *op;
 		self.update_n_z(op);
 	}
 
-	pub fn exec_sta(&mut self, op: MutOp) {
-		*self.get_mut_op(op) = self.a;
+	pub fn exec_sta<'a>(&mut self, op: impl Into<MutOp<'a>>) {
+		*self.get_mut_op(op.into()) = self.a;
 	}
 
-	pub fn exec_stx(&mut self, op: MutOp) {
-		*self.get_mut_op(op) = self.x;
+	pub fn exec_stx<'a>(&mut self, op: impl Into<MutOp<'a>>) {
+		*self.get_mut_op(op.into()) = self.x;
 	}
 
-	pub fn exec_sty(&mut self, op: MutOp) {
-		*self.get_mut_op(op) = self.y;
+	pub fn exec_sty<'a>(&mut self, op: impl Into<MutOp<'a>>) {
+		*self.get_mut_op(op.into()) = self.y;
 	}
 
-	pub fn exec_lda(&mut self, op: Op) {
+	pub fn exec_lda(&mut self, op: impl Into<Op>) {
 		self.a = self.get_op(op);
 		self.update_n_z(self.a);
 	}
 
-	pub fn exec_ldx(&mut self, op: Op) {
+	pub fn exec_ldx(&mut self, op: impl Into<Op>) {
 		self.x = self.get_op(op);
 		self.update_n_z(self.x);
 	}
 
-	pub fn exec_ldy(&mut self, op: Op) {
+	pub fn exec_ldy(&mut self, op: impl Into<Op>) {
 		self.y = self.get_op(op);
 		self.update_n_z(self.y);
 	}
 
-	pub fn exec_cmp(&mut self, op: Op) {
+	pub fn exec_cmp(&mut self, op: impl Into<Op>) {
 		let op = self.get_op(op);
 		self.do_compare(self.a, op);
 	}
 
-	pub fn exec_cpx(&mut self, op: Op) {
+	pub fn exec_cpx(&mut self, op: impl Into<Op>) {
 		let op = self.get_op(op);
 		self.do_compare(self.x, op);
 	}
 
-	pub fn exec_cpy(&mut self, op: Op) {
+	pub fn exec_cpy(&mut self, op: impl Into<Op>) {
 		let op = self.get_op(op);
 		self.do_compare(self.y, op);
 	}
 
-	pub fn exec_bit(&mut self, op: Op) {
+	pub fn exec_bit(&mut self, op: impl Into<Op>) {
 		let op = self.get_op(op);
 		let result = self.a & op;
 		self.update_n_z(result);
-		self.p.set(Status::V, result & 0x40 != 0);
+		self.status.set(Status::V, result & 0x40 != 0);
 	}
 
-	pub fn exec_ora(&mut self, op: Op) {
+	pub fn exec_ora(&mut self, op: impl Into<Op>) {
 		self.a |= self.get_op(op);
 		self.update_n_z(self.a);
 	}
 
-	pub fn exec_and(&mut self, op: Op) {
+	pub fn exec_and(&mut self, op: impl Into<Op>) {
 		self.a &= self.get_op(op);
 		self.update_n_z(self.a);
 	}
 
-	pub fn exec_eor(&mut self, op: Op) {
+	pub fn exec_eor(&mut self, op: impl Into<Op>) {
 		self.a ^= self.get_op(op);
 		self.update_n_z(self.a);
 	}
 
-	pub fn exec_adc(&mut self, op: Op) {
-		if self.p.contains(Status::D) {
+	pub fn exec_adc(&mut self, op: impl Into<Op>) {
+		if self.status.contains(Status::D) {
 			unimplemented!();
 		} else {
-			let (a, c1) = self.a.overflowing_add(self.p.contains(Status::C) as u8);
+			let (a, c1) = self.a.overflowing_add(self.status.contains(Status::C) as u8);
 			let (a, c2) = a.overflowing_add(self.get_op(op));
 			self.a = a;
-			self.p.set(Status::C, c1 || c2);
+			self.status.set(Status::C, c1 || c2);
 		}
 		// TODO: flags: V
 		self.update_n_z(self.a);
 	}
 
-	pub fn exec_sbc(&mut self, op: Op) {
-		if self.p.contains(Status::D) {
+	pub fn exec_sbc(&mut self, op: impl Into<Op>) {
+		if self.status.contains(Status::D) {
 			unimplemented!();
 		} else {
-			let borrow = !self.p.contains(Status::C);
+			let borrow = !self.status.contains(Status::C);
 			let (a, b1) = self.a.overflowing_sub(borrow as u8);
 			let (a, b2) = a.overflowing_sub(self.get_op(op));
 			self.a = a;
-			self.p.set(Status::C, !(b1 || b2));
+			self.status.set(Status::C, !(b1 || b2));
 		}
 		// TODO: flags: V
 		self.update_n_z(self.a);
 	}
 
-	pub fn exec_asl(&mut self, op: MutOp) {
-		let op = self.get_mut_op(op);
+	pub fn exec_asl<'a>(&mut self, op:  impl Into<MutOp<'a>>) {
+		let op = self.get_mut_op(op.into());
 		let new_c = *op & 0x80 != 0;
 		*op <<= 1;
 		let op = *op;
-		self.p.set(Status::C, new_c);
+		self.status.set(Status::C, new_c);
 		self.update_n_z(op);
 	}
 
-	pub fn exec_lsr(&mut self, op: MutOp) {
-		let op = self.get_mut_op(op);
+	pub fn exec_lsr<'a>(&mut self, op:  impl Into<MutOp<'a>>) {
+		let op = self.get_mut_op(op.into());
 		let new_c = *op & 1 != 0;
 		*op >>= 1;
 		let op = *op;
 		self.update_n_z(op);
-		self.p.set(Status::C, new_c);
+		self.status.set(Status::C, new_c);
 	}
 
-	pub fn exec_rol(&mut self, op: MutOp) {
-		let c = self.p.contains(Status::C) as u8;
-		let op = self.get_mut_op(op);
+	pub fn exec_rol<'a>(&mut self, op:  impl Into<MutOp<'a>>) {
+		let c = self.status.contains(Status::C) as u8;
+		let op = self.get_mut_op(op.into());
 		let new_c = *op & 0x80 != 0;
 		*op = *op << 1 | c;
 		let op = *op;
-		self.p.set(Status::C, new_c);
+		self.status.set(Status::C, new_c);
 		self.update_n_z(op);
 	}
 
-	pub fn exec_ror(&mut self, op: MutOp) {
-		let c = self.p.contains(Status::C) as u8;
-		let op = self.get_mut_op(op);
+	pub fn exec_ror<'a>(&mut self, op:  impl Into<MutOp<'a>>) {
+		let c = self.status.contains(Status::C) as u8;
+		let op = self.get_mut_op(op.into());
 		let new_c = *op & 1 != 0;
 		*op = *op >> 1 | c << 7;
 		let op = *op;
-		self.p.set(Status::C, new_c);
+		self.status.set(Status::C, new_c);
 		self.update_n_z(op);
 	}
 
@@ -677,13 +701,13 @@ impl Cpu {
 
 	fn do_compare(&mut self, a: u8, b: u8) {
 		let (result, borrow) = a.overflowing_sub(b);
-		self.p.set(Status::Z, result == 0);
-		self.p.set(Status::C, !borrow);
-		self.p.set(Status::N, result & 0x80 != 0);
+		self.status.set(Status::Z, result == 0);
+		self.status.set(Status::C, !borrow);
+		self.status.set(Status::N, result & 0x80 != 0);
 	}
 
 	fn update_n_z(&mut self, value: u8) {
-		self.p.set(Status::N, value & 0x80 != 0);
-		self.p.set(Status::Z, value == 0);
+		self.status.set(Status::N, value & 0x80 != 0);
+		self.status.set(Status::Z, value == 0);
 	}
 }
