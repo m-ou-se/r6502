@@ -528,9 +528,8 @@ impl Cpu {
 	}
 
 	pub fn exec_branch(&mut self, flag: Status, condition: bool) {
-		let target = self
-			.pc
-			.wrapping_add(i16::from(self.read_imm() as i8) as u16);
+		let offset = i16::from(self.read_imm() as i8) as u16;
+		let target = self.pc.wrapping_add(offset);
 		if self.status.contains(flag) == condition {
 			self.pc = target;
 		}
