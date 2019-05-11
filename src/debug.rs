@@ -1,14 +1,13 @@
 use super::{Cpu, Status};
 
 impl std::fmt::Debug for Cpu {
+	#[rustfmt::skip]
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "   A │ {:02x}\n", self.a)?;
 		write!(f, "   X │ {:02x}\n", self.x)?;
 		write!(f, "   Y │ {:02x}\n", self.y)?;
-		write!(f, "   S │ {:02x}\n", self.s)?;
-		write!(
-			f,
-			"   P │ {:02x} (N={} V={} D={} I={} Z={} C={})\n",
+		write!(f, "   S │ {:02x}\n", self.s,)?;
+		write!(f, "   P │ {:02x} (N={} V={} D={} I={} Z={} C={})\n",
 			self.status,
 			self.status.contains(Status::N) as u8,
 			self.status.contains(Status::V) as u8,
@@ -17,10 +16,11 @@ impl std::fmt::Debug for Cpu {
 			self.status.contains(Status::Z) as u8,
 			self.status.contains(Status::C) as u8,
 		)?;
-		write!(f, "  PC │ {:04x}\n", self.pc)?;
+		write!(f, "  PC │ {:04x}\n", self.pc,)?;
 
 		let pc = usize::from(self.pc);
 		let sp = usize::from(self.s) + 0x0100;
+
 		let mut skipping = false;
 		for i in 0..0x1000 {
 			let addr = i * 0x10;
@@ -40,10 +40,12 @@ impl std::fmt::Debug for Cpu {
 				}
 				f.write_str("\n")?;
 				if has_pc {
-					write!(f, "  PC │{:>w$}\n", "^^", w = 3 * (pc - addr + 1))?;
+					let offset = 3 * (pc - addr);
+					write!(f, "     │{:>w$}{} PC\n", "└", "─".repeat(47 - offset), w = offset + 2)?;
 				}
-				if has_sp {
-					write!(f, "   S │{:>w$}\n", "^^", w = 3 * (sp - addr + 1))?;
+				if has_sp && sp != pc {
+					let offset = 3 * (sp - addr);
+					write!(f, "     │{:>w$}{} S\n", "└", "─".repeat(47 - offset), w = offset + 2)?;
 				}
 			}
 		}
