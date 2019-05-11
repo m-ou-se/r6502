@@ -630,11 +630,30 @@ impl Cpu {
 	}
 
 	pub fn exec_adc(&mut self, op: impl Into<Op>) {
+		let op = self.get_op(op);
 		if self.status.contains(Status::D) {
-			unimplemented!();
+			let mut al = self.a & 0xF;
+			let mut ah = self.a >> 4;
+			let ol = op & 0xF;
+			let oh = op >> 4;
+			al += self.status.contains(Status::C) as u8;
+			al += ol;
+			while al >= 10 {
+				al -= 10;
+				ah += 1;
+			}
+			ah += oh;
+			let c = if ah >= 10 {
+				ah -= 10;
+				true
+			} else {
+				false
+			};
+			self.a = ah << 4 | al;
+			self.status.set(Status::C, c);
 		} else {
 			let (a, c1) = self.a.overflowing_add(self.status.contains(Status::C) as u8);
-			let (a, c2) = a.overflowing_add(self.get_op(op));
+			let (a, c2) = a.overflowing_add(op);
 			self.a = a;
 			self.status.set(Status::C, c1 || c2);
 		}
