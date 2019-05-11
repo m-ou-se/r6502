@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 
+/// A 6502 CPU.
 #[derive(Clone)]
 pub struct Cpu {
 	/// The accumulator register.
@@ -19,6 +20,7 @@ pub struct Cpu {
 }
 
 bitflags! {
+	/// The [CPU][Cpu]'s [processor status register][Cpu::p].
 	pub struct Status: u8 {
 		/// The carry or not-borrow flag.
 		const C = 0b00000001;
@@ -35,6 +37,7 @@ bitflags! {
 	}
 }
 
+/// An operand to an instruction which may modify it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MutOp {
 	/// The operand is the [accumulator register][Cpu::a].
@@ -67,6 +70,7 @@ pub enum MutOp {
 	Iny,
 }
 
+/// An operand to an instruction which only reads it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
 	/// The operand is the given constant.
@@ -97,6 +101,7 @@ impl Op {
 	pub const Iny: Op = Op::Mut(MutOp::Iny);
 }
 
+/// An operand to a [non-conditional jump instruction][Cpu::exec_jmp].
 pub enum JmpOp {
 	/// The (two byte) target address of the jump is stored in right after the instruction.
 	Im2,
@@ -163,18 +168,28 @@ impl Cpu {
 
 /// Operands.
 impl Cpu {
+	/// Read a byte at the program counter.
+	///
+	/// Increments the program counter.
 	pub fn read_imm(&mut self) -> u8 {
 		let addr = self.pc;
 		self.pc = self.pc.wrapping_add(1);
 		self.read(addr)
 	}
 
+	/// Read a word at the program counter.
+	///
+	/// Increments the program counter by two.
 	pub fn read_im2(&mut self) -> u16 {
 		let low = u16::from(self.read_imm());
 		let high = u16::from(self.read_imm());
 		high << 8 | low
 	}
 
+	/// Get the value of an operand.
+	///
+	/// Depending on the type of operand, this might increment the program
+	/// counter by one or two.
 	pub fn get_op(&mut self, op: Op) -> u8 {
 		match op {
 			Op::Const(x) => x,
@@ -183,6 +198,14 @@ impl Cpu {
 		}
 	}
 
+	/// Get mutable access to an operand.
+	///
+	/// Depending on the type of operand, this might increment the program
+	/// counter by one or two.
+	///
+	/// The resulting reference either refers to one of the registers ([the
+	/// accumulator][Cpu::a], [X][Cpu::x], [Y][Cpu::y], or [the stack
+	/// pointer][Cpu::s]), or somewhere into [the memory][Cpu::mem].
 	pub fn get_mut_op(&mut self, op: MutOp) -> &mut u8 {
 		match op {
 			MutOp::Acc => &mut self.a,
